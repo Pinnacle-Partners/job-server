@@ -2,20 +2,19 @@ const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const axios = require('axios');
-const bodyparser = require('body-parser')
+const bodyParser = require('body-parser');
+const FormData = require('form-data');
 
 // Load environment variables from .env file
 dotenv.config();
 
-// Body-parser middleware
-app.use(bodyparser.urlencoded({ extended: true }))
-app.use(bodyparser.json())
-
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Middleware
 app.use(cors());
-app.use(express.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
 
 app.get('/credentials', (req, res) => {
     const username = process.env.TRACKERRMS_USERNAME;
@@ -27,10 +26,7 @@ app.get('/credentials', (req, res) => {
         });
     }
 
-    res.json({
-        username: username,
-        password: password,
-    });
+    res.json({ username, password });
 });
 
 app.post('/api/createResource', async (req, res) => {
@@ -50,11 +46,8 @@ app.post('/api/createResource', async (req, res) => {
 
         const recordId = resourceResponse.data.recordId;
         const jobCode = formData.trackerrms.createResource.instructions.assigntoopportunity;
-
-        // Use the local date and time from the client
         const { localDateTime } = formData.trackerrms.createResource;
         const fullName = formData.trackerrms.createResource.resource.fullname;
-
 
         // First activity data
         const activityData1 = {
@@ -96,11 +89,12 @@ app.post('/api/createResource', async (req, res) => {
             },
         };
 
-        // Second API call to create first activity
+        // Authorization header
         const authHeader = 'Basic ' + Buffer.from(
             `${process.env.TRACKERRMS_USERNAME}:${process.env.TRACKERRMS_PASSWORD}`
         ).toString('base64');
 
+        // Second API call to create first activity
         const activityResponse1 = await axios.post(
             'https://evoapius.tracker-rms.com/api/widget/createActivity',
             activityData1,
@@ -112,6 +106,7 @@ app.post('/api/createResource', async (req, res) => {
             }
         );
 
+        // Third API call to create second activity
         const activityResponse2 = await axios.post(
             'https://evoapius.tracker-rms.com/api/widget/createActivity',
             activityData2,
@@ -153,19 +148,20 @@ app.post('/api/createResource', async (req, res) => {
             }
         );
 
+        // Attach document if provided
         if (documentData) {
-            documentData.trackerrms.attachDocument.credentials = {
-                username: process.env.TRACKERRMS_USERNAME,
-                password: process.env.TRACKERRMS_PASSWORD,
-            };
-            documentData.trackerrms.attachDocument.file.recordId = recordId;
+            const formData = new FormData();
+            formData.append('file', documentData.trackerrms.attachDocument.file);
+            formData.append('recordId', recordId);
+            formData.append('username', process.env.TRACKERRMS_USERNAME);
+            formData.append('password', process.env.TRACKERRMS_PASSWORD);
 
             const documentResponse = await axios.post(
                 'https://evoapius.tracker-rms.com/api/widget/attachDocument',
-                documentData,
+                formData,
                 {
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': 'multipart/form-data',
                         Authorization: authHeader,
                     },
                 }
