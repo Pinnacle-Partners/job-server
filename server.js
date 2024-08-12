@@ -3,16 +3,15 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const axios = require('axios');
 
-
 // Load environment variables from .env file
 dotenv.config();
-
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '20mb' })); // Increase payload size limit
+app.use(express.urlencoded({ limit: '20mb', extended: true })); // If you also need to handle URL-encoded data
 
 app.get('/credentials', (req, res) => {
     const username = process.env.TRACKERRMS_USERNAME;
@@ -51,7 +50,6 @@ app.post('/api/createResource', async (req, res) => {
         // Use the local date and time from the client
         const { localDateTime } = formData.trackerrms.createResource;
         const fullName = formData.trackerrms.createResource.resource.fullname;
-
 
         // First activity data
         const activityData1 = {
