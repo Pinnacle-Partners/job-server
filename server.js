@@ -129,7 +129,7 @@ app.post('/api/createResource', async (req, res) => {
                     instructions: {
                         opportunityid: jobCode,
                         resourceid: recordId,
-                        assigntolist: "short", 
+                        assigntolist: "short",
                         shortlistedby: "resource",
                         source: "Website",
                     }
@@ -148,39 +148,26 @@ app.post('/api/createResource', async (req, res) => {
             }
         );
 
-       if (documentData) {
-    const form = new FormData();
-    form.append('file', documentData.trackerrms.attachDocument.file.data, documentData.trackerrms.attachDocument.file.filename);
+        // Attach document if provided
+        if (documentData) {
+            const form = new FormData();
+            form.append('file', documentData.trackerrms.attachDocument.file.data, documentData.trackerrms.attachDocument.file.filename);
+            form.append('recordType', documentData.trackerrms.attachDocument.recordType);
+            form.append('recordId', recordId);
+            form.append('documentType', documentData.trackerrms.attachDocument.documentType);
+            form.append('primary', documentData.trackerrms.attachDocument.primary);
 
-    try {
-        const documentResponse = await axios.post(
-            'https://evoapius.tracker-rms.com/api/widget/attachDocument',
-            form,
-            {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                    Authorization: authHeader,
-                },
-            }
-        );
-        res.status(200).json({
-            resource: resourceResponse.data,
-            activity1: activityResponse1.data,
-            activity2: activityResponse2.data,
-            resourceApplication: resourceApplicationResponse.data,
-            document: documentResponse.data,
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-} else {
-    res.status(200).json({
-        resource: resourceResponse.data,
-        activity1: activityResponse1.data,
-        activity2: activityResponse2.data,
-        resourceApplication: resourceApplicationResponse.data,
-    });
-}
+            const documentResponse = await axios.post(
+                'https://evoapius.tracker-rms.com/api/widget/attachDocument',
+                form,
+                {
+                    headers: {
+                        'Content-Type': 'multipart/form-data',
+                        Authorization: authHeader,
+                    },
+                }
+            );
+
             res.status(200).json({
                 resource: resourceResponse.data,
                 activity1: activityResponse1.data,
@@ -204,5 +191,3 @@ app.post('/api/createResource', async (req, res) => {
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });
-
-// Updated 
