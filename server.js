@@ -6,10 +6,6 @@ const axios = require('axios');
 // Load environment variables from .env file
 dotenv.config();
 
-// Body-parser middleware
-app.use(bodyparser.urlencoded({ extended: true }))
-app.use(bodyparser.json())
-
 const app = express();
 const port = process.env.PORT || 3000;
 
