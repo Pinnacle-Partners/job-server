@@ -148,25 +148,39 @@ app.post('/api/createResource', async (req, res) => {
             }
         );
 
-        // Attach document if provided
-        if (documentData) {
-            const formData = new FormData();
-            formData.append('file', documentData.trackerrms.attachDocument.file);
-            formData.append('recordId', recordId);
-            formData.append('username', process.env.TRACKERRMS_USERNAME);
-            formData.append('password', process.env.TRACKERRMS_PASSWORD);
+       if (documentData) {
+    const form = new FormData();
+    form.append('file', documentData.trackerrms.attachDocument.file.data, documentData.trackerrms.attachDocument.file.filename);
 
-            const documentResponse = await axios.post(
-                'https://evoapius.tracker-rms.com/api/widget/attachDocument',
-                formData,
-                {
-                    headers: {
-                        'Content-Type': 'multipart/form-data',
-                        Authorization: authHeader,
-                    },
-                }
-            );
-
+    try {
+        const documentResponse = await axios.post(
+            'https://evoapius.tracker-rms.com/api/widget/attachDocument',
+            form,
+            {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    Authorization: authHeader,
+                },
+            }
+        );
+        res.status(200).json({
+            resource: resourceResponse.data,
+            activity1: activityResponse1.data,
+            activity2: activityResponse2.data,
+            resourceApplication: resourceApplicationResponse.data,
+            document: documentResponse.data,
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+} else {
+    res.status(200).json({
+        resource: resourceResponse.data,
+        activity1: activityResponse1.data,
+        activity2: activityResponse2.data,
+        resourceApplication: resourceApplicationResponse.data,
+    });
+}
             res.status(200).json({
                 resource: resourceResponse.data,
                 activity1: activityResponse1.data,
