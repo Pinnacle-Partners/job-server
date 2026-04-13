@@ -71,6 +71,7 @@ app.post('/api/createResource', async (req, res) => {
                         note: 'Associated with new resource creation',
                         linkRecordType: 'O',
                         linkRecordId: jobCode,
+                        userId: 3714,
                     },
                 },
             },
