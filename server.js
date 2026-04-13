@@ -50,6 +50,7 @@ app.post('/api/createResource', async (req, res) => {
                         note: 'Associated with new resource creation',
                         linkRecordType: 'R',
                         linkRecordId: recordId,
+                        userId: 3714,
                     },
                 },
             },
