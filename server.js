@@ -105,23 +105,23 @@ app.post('/api/createResource', async (req, res) => {
         );
 
         // Third API call to assign resource to the job as applied
-        const resourceApplicationData = {
-            trackerrms: {
-                resourceApplication: {
-                    credentials: {
-                        username: process.env.TRACKERRMS_USERNAME,
-                        password: process.env.TRACKERRMS_PASSWORD,
-                    },
-                    instructions: {
-                        opportunityid: jobCode,
-                        resourceid: recordId,
-                        assigntolist: "short", 
-                        shortlistedby: "resource",
-                        source: "Website",
-                    }
-                }
+const resourceApplicationData = {
+    trackerrms: {
+        resourceApplication: {
+            credentials: {
+                username: process.env.TRACKERRMS_USERNAME,
+                password: process.env.TRACKERRMS_PASSWORD,
+            },
+            instructions: {
+                opportunityid: jobCode,
+                resourceid: recordId,
+                assigntolist: "short", 
+                shortlistedby: "resource",
+                source: formData.trackerrms.createResource.resource.source || "Website",
             }
-        };
+        }
+    }
+};
 
         const resourceApplicationResponse = await axios.post(
             'https://evoapius.tracker-rms.com/api/widget/resourceApplication',
