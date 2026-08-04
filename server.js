@@ -3,15 +3,16 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const axios = require("axios");
 
+// Load environment variables from the .env file
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-const TRACKER_API_BASE =
-    "https://evoapius.tracker-rms.com/api/widget";
-
+// Allow requests from the website
 app.use(cors());
+
+// Allow larger requests because resumes are sent as Base64 data
 app.use(express.json({ limit: "20mb" }));
 app.use(
     express.urlencoded({
@@ -20,248 +21,172 @@ app.use(
     })
 );
 
-function getTrackerCredentials() {
-    return {
-        username: process.env.TRACKERRMS_USERNAME,
-        password: process.env.TRACKERRMS_PASSWORD,
-    };
-}
-
-function getAuthorizationHeader() {
-    const username = process.env.TRACKERRMS_USERNAME;
-    const password = process.env.TRACKERRMS_PASSWORD;
-
-    return (
-        "Basic " +
-        Buffer.from(`${username}:${password}`).toString("base64")
-    );
-}
-
-function getAxiosConfig() {
-    return {
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: getAuthorizationHeader(),
-        },
-        timeout: 30000,
-    };
-}
-
-function getRecordId(responseData) {
-    return (
-        responseData?.recordId ||
-        responseData?.recordid ||
-        responseData?.id ||
-        responseData?.trackerrms?.createResource?.recordId ||
-        responseData?.trackerrms?.createResource?.recordid ||
-        responseData?.trackerrms?.createResource?.id ||
-        null
-    );
-}
-
+/*
+|--------------------------------------------------------------------------
+| Basic server test
+|--------------------------------------------------------------------------
+| Visiting the Render URL should return a message showing that the server
+| is running.
+*/
 app.get("/", (req, res) => {
     res.status(200).json({
         success: true,
-        status: "online",
-        message: "Pinnacle Tracker submission server is running.",
+        message: "Pinnacle Tracker server is running.",
     });
 });
 
+/*
+|--------------------------------------------------------------------------
+| Create Tracker resource
+|--------------------------------------------------------------------------
+*/
 app.post("/api/createResource", async (req, res) => {
-    const { formData, documentData } = req.body;
-
     console.log("========================================");
-    console.log("New application received");
-    console.log("Time:", new Date().toISOString());
+    console.log("New website application received");
+    console.log("Received at:", new Date().toISOString());
+
+    const { formData, documentData } = req.body;
 
     try {
         /*
-         * Validate server environment variables
+         * Confirm the required environment variables exist.
          */
         if (!process.env.TRACKERRMS_USERNAME) {
-            return res.status(500).json({
-                success: false,
-                step: "server-configuration",
-                error:
-                    "TRACKERRMS_USERNAME is missing from the server environment variables.",
-            });
+            throw new Error(
+                "TRACKERRMS_USERNAME is missing from the Render environment variables."
+            );
         }
 
         if (!process.env.TRACKERRMS_PASSWORD) {
-            return res.status(500).json({
-                success: false,
-                step: "server-configuration",
-                error:
-                    "TRACKERRMS_PASSWORD is missing from the server environment variables.",
-            });
+            throw new Error(
+                "TRACKERRMS_PASSWORD is missing from the Render environment variables."
+            );
         }
 
         /*
-         * Validate incoming request
+         * Confirm the front end sent the expected form structure.
          */
-        if (
-            !formData?.trackerrms?.createResource
-        ) {
+        if (!formData?.trackerrms?.createResource) {
             return res.status(400).json({
                 success: false,
-                step: "validate-request",
-                error: "The createResource form data is missing.",
+                step: "validate-form-data",
+                error: "The createResource form data was not received.",
             });
         }
 
-        const createResource =
+        const createResourceData =
             formData.trackerrms.createResource;
 
-        const resource =
-            createResource.resource || {};
+        const applicant =
+            createResourceData.resource || {};
 
-        const instructions =
-            createResource.instructions || {};
-
-        const jobCode = String(
-            instructions.assigntoopportunity || ""
-        ).trim();
-
-        const fullName = String(
-            resource.fullname || ""
-        ).trim();
-
-        const email = String(
-            resource.email || ""
-        ).trim();
-
-        console.log("Applicant:", fullName || "MISSING");
-        console.log("Email:", email || "MISSING");
-        console.log("Job code:", jobCode || "MISSING");
-
-        if (!fullName) {
-            return res.status(400).json({
-                success: false,
-                step: "validate-request",
-                error: "The applicant's full name is missing.",
-            });
-        }
-
-        if (!email) {
-            return res.status(400).json({
-                success: false,
-                step: "validate-request",
-                error: "The applicant's email address is missing.",
-            });
-        }
-
-        if (!jobCode) {
-            return res.status(400).json({
-                success: false,
-                step: "validate-job-code",
-                error:
-                    "No job code was provided. Make sure the application page URL contains ?jobcode= followed by the Tracker job code.",
-            });
-        }
-
-        /*
-         * Add Tracker credentials to createResource request
-         */
-        createResource.credentials =
-            getTrackerCredentials();
-
-        /*
-         * STEP 1: Create the resource
-         */
-        console.log(
-            "Step 1: Creating Tracker resource..."
-        );
-
-        let resourceResponse;
-
-        try {
-            resourceResponse = await axios.post(
-                `${TRACKER_API_BASE}/createResource`,
-                formData,
-                getAxiosConfig()
-            );
-        } catch (error) {
-            console.error(
-                "Create resource request failed:",
-                error.response?.data || error.message
-            );
-
-            return res.status(502).json({
-                success: false,
-                step: "create-resource",
-                error:
-                    "Tracker rejected the resource creation request.",
-                message: error.message,
-                trackerResponse:
-                    error.response?.data || null,
-            });
-        }
+        const jobCode =
+            createResourceData.instructions
+                ?.assigntoopportunity || "";
 
         console.log(
-            "Create resource response:",
-            JSON.stringify(
-                resourceResponse.data,
-                null,
-                2
-            )
+            "Applicant:",
+            applicant.fullname || "No full name received"
         );
 
-        const recordId =
-            getRecordId(resourceResponse.data);
+        console.log(
+            "Email:",
+            applicant.email || "No email received"
+        );
+
+        console.log(
+            "Job code:",
+            jobCode || "No job code received"
+        );
+
+        /*
+         * Add Tracker credentials to the createResource request.
+         *
+         * This keeps the exact structure from your previously working
+         * server.js file.
+         */
+        createResourceData.credentials = {
+            username: process.env.TRACKERRMS_USERNAME,
+            password: process.env.TRACKERRMS_PASSWORD,
+        };
+
+        /*
+        |--------------------------------------------------------------------------
+        | STEP 1: Create the resource
+        |--------------------------------------------------------------------------
+        */
+
+        console.log("Step 1: Creating resource in Tracker...");
+
+        const resourceResponse = await axios.post(
+            "https://evoapius.tracker-rms.com/api/widget/createResource",
+            formData,
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                },
+            }
+        );
+
+        console.log(
+            "Tracker createResource response:",
+            JSON.stringify(resourceResponse.data, null, 2)
+        );
+
+        const recordId = resourceResponse.data.recordId;
 
         if (!recordId) {
             console.error(
-                "Tracker did not return a resource record ID."
+                "Tracker responded but did not return a recordId."
             );
 
             return res.status(502).json({
                 success: false,
                 step: "create-resource",
                 error:
-                    "Tracker responded, but no resource record ID was returned.",
-                trackerResponse:
-                    resourceResponse.data,
+                    "Tracker did not return a resource record ID.",
+                trackerResponse: resourceResponse.data,
             });
         }
 
         console.log(
-            "Tracker resource ID:",
+            "Resource successfully created. Record ID:",
             recordId
         );
 
         /*
-         * Determine activity date and time
+         * Get information needed for the activity records.
          */
         const localDateTime =
-            createResource.localDateTime || {};
+            createResourceData.localDateTime;
 
-        const currentDate = new Date();
-
-        const activityDate =
-            localDateTime.date ||
-            currentDate
-                .toISOString()
-                .slice(0, 10);
-
-        const activityTime =
-            localDateTime.time ||
-            currentDate
-                .toTimeString()
-                .slice(0, 5);
+        const fullName =
+            createResourceData.resource.fullname;
 
         /*
-         * STEP 2: Create activity on the resource
+         * Create the Basic Authorization header used by the other
+         * Tracker endpoints.
          */
+        const authHeader =
+            "Basic " +
+            Buffer.from(
+                `${process.env.TRACKERRMS_USERNAME}:${process.env.TRACKERRMS_PASSWORD}`
+            ).toString("base64");
+
+        /*
+        |--------------------------------------------------------------------------
+        | STEP 2: Create activity on the resource
+        |--------------------------------------------------------------------------
+        */
+
         const activityData1 = {
             trackerrms: {
                 createActivity: {
-                    credentials:
-                        getTrackerCredentials(),
                     activity: {
                         subject: `Filled out application for job ${jobCode}.`,
                         type: "Email",
-                        date: activityDate,
-                        time: activityTime,
+                        date: localDateTime.date,
+                        time: localDateTime.time,
                         status: "Completed",
                         priority: "Medium",
                         contactType: "Outbound",
@@ -276,57 +201,39 @@ app.post("/api/createResource", async (req, res) => {
         };
 
         console.log(
-            "Step 2: Creating resource activity..."
+            "Step 2: Creating activity on the resource..."
         );
 
-        let activityResponse1;
-
-        try {
-            activityResponse1 = await axios.post(
-                `${TRACKER_API_BASE}/createActivity`,
-                activityData1,
-                getAxiosConfig()
-            );
-
-            console.log(
-                "Resource activity response:",
-                JSON.stringify(
-                    activityResponse1.data,
-                    null,
-                    2
-                )
-            );
-        } catch (error) {
-            console.error(
-                "Resource activity failed:",
-                error.response?.data || error.message
-            );
-
-            activityResponse1 = {
-                data: {
-                    success: false,
-                    warning:
-                        "The resource was created, but the activity on the resource failed.",
-                    error:
-                        error.response?.data ||
-                        error.message,
+        const activityResponse1 = await axios.post(
+            "https://evoapius.tracker-rms.com/api/widget/createActivity",
+            activityData1,
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: authHeader,
                 },
-            };
-        }
+            }
+        );
+
+        console.log(
+            "Resource activity response:",
+            JSON.stringify(activityResponse1.data, null, 2)
+        );
 
         /*
-         * STEP 3: Create activity on the job/opportunity
-         */
+        |--------------------------------------------------------------------------
+        | STEP 3: Create activity on the opportunity
+        |--------------------------------------------------------------------------
+        */
+
         const activityData2 = {
             trackerrms: {
                 createActivity: {
-                    credentials:
-                        getTrackerCredentials(),
                     activity: {
                         subject: `${fullName} has applied.`,
                         type: "Email",
-                        date: activityDate,
-                        time: activityTime,
+                        date: localDateTime.date,
+                        time: localDateTime.time,
                         status: "Completed",
                         priority: "Medium",
                         contactType: "Outbound",
@@ -341,223 +248,198 @@ app.post("/api/createResource", async (req, res) => {
         };
 
         console.log(
-            "Step 3: Creating opportunity activity..."
+            "Step 3: Creating activity on the opportunity..."
         );
 
-        let activityResponse2;
-
-        try {
-            activityResponse2 = await axios.post(
-                `${TRACKER_API_BASE}/createActivity`,
-                activityData2,
-                getAxiosConfig()
-            );
-
-            console.log(
-                "Opportunity activity response:",
-                JSON.stringify(
-                    activityResponse2.data,
-                    null,
-                    2
-                )
-            );
-        } catch (error) {
-            console.error(
-                "Opportunity activity failed:",
-                error.response?.data || error.message
-            );
-
-            activityResponse2 = {
-                data: {
-                    success: false,
-                    warning:
-                        "The resource was created, but the activity on the opportunity failed.",
-                    error:
-                        error.response?.data ||
-                        error.message,
+        const activityResponse2 = await axios.post(
+            "https://evoapius.tracker-rms.com/api/widget/createActivity",
+            activityData2,
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: authHeader,
                 },
-            };
-        }
+            }
+        );
+
+        console.log(
+            "Opportunity activity response:",
+            JSON.stringify(activityResponse2.data, null, 2)
+        );
 
         /*
-         * STEP 4: Assign the resource to the job
-         */
+        |--------------------------------------------------------------------------
+        | STEP 4: Assign the resource to the opportunity
+        |--------------------------------------------------------------------------
+        */
+
         const resourceApplicationData = {
             trackerrms: {
                 resourceApplication: {
-                    credentials:
-                        getTrackerCredentials(),
+                    credentials: {
+                        username:
+                            process.env.TRACKERRMS_USERNAME,
+                        password:
+                            process.env.TRACKERRMS_PASSWORD,
+                    },
                     instructions: {
                         opportunityid: jobCode,
                         resourceid: recordId,
                         assigntolist: "short",
                         shortlistedby: "resource",
                         source:
-                            resource.source ||
-                            "Website",
+                            createResourceData.resource
+                                .source || "Website",
                     },
                 },
             },
         };
 
         console.log(
-            "Step 4: Assigning resource to opportunity..."
+            "Step 4: Assigning resource to the job..."
         );
 
-        let resourceApplicationResponse;
-
-        try {
-            resourceApplicationResponse =
-                await axios.post(
-                    `${TRACKER_API_BASE}/resourceApplication`,
-                    resourceApplicationData,
-                    getAxiosConfig()
-                );
-
-            console.log(
-                "Resource application response:",
-                JSON.stringify(
-                    resourceApplicationResponse.data,
-                    null,
-                    2
-                )
-            );
-        } catch (error) {
-            console.error(
-                "Resource application failed:",
-                error.response?.data || error.message
+        const resourceApplicationResponse =
+            await axios.post(
+                "https://evoapius.tracker-rms.com/api/widget/resourceApplication",
+                resourceApplicationData,
+                {
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+                        Authorization: authHeader,
+                    },
+                }
             );
 
-            return res.status(502).json({
-                success: false,
-                step: "resource-application",
-                error:
-                    "The applicant was created in Tracker, but could not be assigned to the job.",
-                recordId,
-                jobCode,
-                message: error.message,
-                trackerResponse:
-                    error.response?.data || null,
-            });
-        }
+        console.log(
+            "Resource application response:",
+            JSON.stringify(
+                resourceApplicationResponse.data,
+                null,
+                2
+            )
+        );
 
         /*
-         * STEP 5: Attach the resume
-         */
+        |--------------------------------------------------------------------------
+        | STEP 5: Attach the resume
+        |--------------------------------------------------------------------------
+        */
+
         let documentResponse = null;
 
-        if (
-            documentData?.trackerrms?.attachDocument
-        ) {
+        if (documentData) {
             console.log(
-                "Step 5: Attaching resume..."
+                "Step 5: Attaching resume to the resource..."
             );
 
-            const attachDocument =
-                documentData.trackerrms
-                    .attachDocument;
-
-            attachDocument.credentials =
-                getTrackerCredentials();
-
-            if (!attachDocument.file) {
+            if (
+                !documentData?.trackerrms
+                    ?.attachDocument?.file
+            ) {
                 return res.status(400).json({
                     success: false,
                     step: "attach-document",
                     error:
-                        "The resume attachment data is missing the file object.",
+                        "Resume data was received, but the attachment file data is missing.",
                     recordId,
-                    jobCode,
                 });
             }
 
-            attachDocument.file.recordId =
+            documentData.trackerrms.attachDocument.credentials =
+                {
+                    username:
+                        process.env.TRACKERRMS_USERNAME,
+                    password:
+                        process.env.TRACKERRMS_PASSWORD,
+                };
+
+            documentData.trackerrms.attachDocument.file.recordId =
                 recordId;
 
-            try {
-                documentResponse =
-                    await axios.post(
-                        `${TRACKER_API_BASE}/attachDocument`,
-                        documentData,
-                        getAxiosConfig()
-                    );
+            documentResponse = await axios.post(
+                "https://evoapius.tracker-rms.com/api/widget/attachDocument",
+                documentData,
+                {
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+                        Authorization: authHeader,
+                    },
+                }
+            );
 
-                console.log(
-                    "Document response:",
-                    JSON.stringify(
-                        documentResponse.data,
-                        null,
-                        2
-                    )
-                );
-            } catch (error) {
-                console.error(
-                    "Document attachment failed:",
-                    error.response?.data ||
-                        error.message
-                );
-
-                return res.status(502).json({
-                    success: false,
-                    step: "attach-document",
-                    error:
-                        "The applicant and job application were created, but the resume could not be attached.",
-                    recordId,
-                    jobCode,
-                    message: error.message,
-                    trackerResponse:
-                        error.response?.data ||
-                        null,
-                });
-            }
+            console.log(
+                "Document attachment response:",
+                JSON.stringify(
+                    documentResponse.data,
+                    null,
+                    2
+                )
+            );
         } else {
             console.log(
-                "No resume data was received."
+                "No documentData was received."
             );
         }
 
         console.log(
-            "Application completed successfully."
+            "Application submission completed successfully."
         );
+
         console.log("Resource ID:", recordId);
         console.log("Job code:", jobCode);
-        console.log(
-            "========================================"
-        );
+        console.log("========================================");
 
         return res.status(200).json({
             success: true,
             message:
-                "The applicant was created and assigned to the Tracker job.",
+                "The applicant was created in Tracker.",
             recordId,
             jobCode,
             resource: resourceResponse.data,
-            activity1:
-                activityResponse1?.data || null,
-            activity2:
-                activityResponse2?.data || null,
+            activity1: activityResponse1.data,
+            activity2: activityResponse2.data,
             resourceApplication:
-                resourceApplicationResponse?.data ||
-                null,
+                resourceApplicationResponse.data,
             document:
                 documentResponse?.data || null,
         });
     } catch (error) {
         console.error(
-            "Unexpected submission error:"
+            "Application submission failed."
         );
+
         console.error(
-            error.response?.data ||
-                error.stack ||
-                error
+            "Error message:",
+            error.message
         );
+
+        console.error(
+            "Tracker response:",
+            JSON.stringify(
+                error.response?.data || null,
+                null,
+                2
+            )
+        );
+
+        console.error(
+            "HTTP status:",
+            error.response?.status || "No status"
+        );
+
+        console.log("========================================");
 
         return res.status(500).json({
             success: false,
-            step: "unexpected-error",
+            step: "tracker-request",
             error: error.message,
             details:
                 error.response?.data || null,
+            status:
+                error.response?.status || null,
         });
     }
 });
