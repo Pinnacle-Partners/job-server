@@ -113,6 +113,7 @@ app.post('/api/createResource', async (req, res) => {
                         password: process.env.TRACKERRMS_PASSWORD,
                     },
                     instructions: {
+                        overwriteresource: false,
                         opportunityid: jobCode,
                         resourceid: recordId,
                         assigntolist: "short", 
