@@ -375,7 +375,7 @@ app.post('/api/createResource', async (req, res) => {
                         buildTrackerCredentials(),
 
                     instructions: {
-                        overwriteresource: false,
+                        overwriteresource: true,
                     },
 
                     resource: safeResource,
