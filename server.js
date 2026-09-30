@@ -8,14 +8,13 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
+const TRACKER_BASE_URL =
+    'https://evoapius.tracker-rms.com/api/widget';
+
+const TRACKER_USER_ID = 3714;
+
 app.use(cors());
-
-app.use(
-    express.json({
-        limit: '20mb',
-    })
-);
-
+app.use(express.json({ limit: '20mb' }));
 app.use(
     express.urlencoded({
         limit: '20mb',
@@ -23,44 +22,182 @@ app.use(
     })
 );
 
-function trackerResponseFailed(responseData) {
+function cleanString(value, maximumLength = 500) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    return value.trim().slice(0, maximumLength);
+}
+
+function getTrackerStatus(data) {
+    return Number(data?.status);
+}
+
+function trackerSucceeded(data) {
+    return getTrackerStatus(data) === 0;
+}
+
+function getRecordId(data) {
     return (
-        responseData?.status !== undefined &&
-        Number(responseData.status) !== 0
+        data?.recordId ||
+        data?.recordid ||
+        data?.resourceId ||
+        data?.resourceid ||
+        data?.ResourceId ||
+        data?.ResourceID ||
+        data?.id ||
+        data?.Id ||
+        null
     );
+}
+
+function buildTrackerCredentials() {
+    return {
+        username: process.env.TRACKERRMS_USERNAME,
+        password: process.env.TRACKERRMS_PASSWORD,
+    };
+}
+
+function buildBasicAuthorizationHeader() {
+    return (
+        'Basic ' +
+        Buffer.from(
+            `${process.env.TRACKERRMS_USERNAME}:${process.env.TRACKERRMS_PASSWORD}`
+        ).toString('base64')
+    );
+}
+
+function sanitizeJobHistory(jobHistory) {
+    if (!Array.isArray(jobHistory)) {
+        return [];
+    }
+
+    return jobHistory.slice(0, 2).map((job) => ({
+        company: cleanString(job?.company, 150),
+        jobtitle: cleanString(job?.jobtitle, 150),
+        startdate: cleanString(job?.startdate, 25),
+        enddate: cleanString(job?.enddate, 25),
+        description: cleanString(
+            job?.description,
+            2000
+        ),
+    }));
+}
+
+async function createActivity(activity) {
+    const response = await axios.post(
+        `${TRACKER_BASE_URL}/createActivity`,
+        {
+            trackerrms: {
+                createActivity: {
+                    activity,
+                },
+            },
+        },
+        {
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization:
+                    buildBasicAuthorizationHeader(),
+            },
+        }
+    );
+
+    if (!trackerSucceeded(response.data)) {
+        throw new Error(
+            response.data?.message ||
+                'Tracker could not create the activity.'
+        );
+    }
+
+    return response.data;
 }
 
 app.post('/api/createResource', async (req, res) => {
     try {
-        const { formData, documentData } = req.body;
+        if (
+            !process.env.TRACKERRMS_USERNAME ||
+            !process.env.TRACKERRMS_PASSWORD
+        ) {
+            throw new Error(
+                'Tracker credentials are not configured.'
+            );
+        }
 
         const createResourceRequest =
-            formData?.trackerrms?.createResource;
+            req.body?.formData?.trackerrms
+                ?.createResource;
 
-        if (!createResourceRequest) {
+        const documentData =
+            req.body?.documentData;
+
+        if (!createResourceRequest?.resource) {
             return res.status(400).json({
                 success: false,
-                error: 'Application information is missing.',
+                error:
+                    'Application information is missing.',
             });
         }
 
-        const resource =
+        const incomingResource =
             createResourceRequest.resource;
 
-        if (!resource) {
-            return res.status(400).json({
-                success: false,
-                error: 'Candidate information is missing.',
-            });
-        }
+        const firstName = cleanString(
+            incomingResource.firstname,
+            100
+        );
 
-        /*
-         * Validate the job code.
-         */
+        const lastName = cleanString(
+            incomingResource.lastname,
+            100
+        );
+
+        const fullName =
+            `${firstName} ${lastName}`.trim();
+
+        const email = cleanString(
+            incomingResource.email,
+            254
+        );
+
+        const cellphone = cleanString(
+            incomingResource.cellphone,
+            30
+        ).replace(/\D/g, '');
+
         const jobCode = Number(
             createResourceRequest?.instructions
                 ?.assigntoopportunity
         );
+
+        if (!firstName || !lastName) {
+            return res.status(400).json({
+                success: false,
+                error:
+                    'First name and last name are required.',
+            });
+        }
+
+        if (
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+                email
+            )
+        ) {
+            return res.status(400).json({
+                success: false,
+                error:
+                    'A valid email address is required.',
+            });
+        }
+
+        if (cellphone.length !== 10) {
+            return res.status(400).json({
+                success: false,
+                error:
+                    'A valid 10-digit mobile phone number is required.',
+            });
+        }
 
         if (
             !Number.isInteger(jobCode) ||
@@ -68,118 +205,325 @@ app.post('/api/createResource', async (req, res) => {
         ) {
             return res.status(400).json({
                 success: false,
-                error: 'A valid job code was not provided.',
+                error:
+                    'A valid job code was not provided.',
             });
         }
 
-        /*
-         * Read the candidate information.
-         */
-        const firstName =
-            typeof resource.firstname === 'string'
-                ? resource.firstname.trim()
-                : '';
+        const allowedSources = new Set([
+            'Website',
+            'Google',
+            'Dice',
+            'Indeed',
+            'LinkedIn',
+            'CareerBuilder Database Search',
+            'Referral',
+            'Other',
+        ]);
 
-        const lastName =
-            typeof resource.lastname === 'string'
-                ? resource.lastname.trim()
-                : '';
-
-        const fullName =
-            `${firstName} ${lastName}`.trim();
-
-        const email =
-            typeof resource.email === 'string'
-                ? resource.email.trim()
-                : '';
-
-        const cellphone =
-            typeof resource.cellphone === 'string'
-                ? resource.cellphone.replace(/\D/g, '')
-                : '';
-
-        if (!firstName || !lastName) {
-            return res.status(400).json({
-                success: false,
-                error: 'First name and last name are required.',
-            });
-        }
-
-        if (
-            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-        ) {
-            return res.status(400).json({
-                success: false,
-                error: 'A valid email address is required.',
-            });
-        }
-
-        if (cellphone.length !== 10) {
-            return res.status(400).json({
-                success: false,
-                error: 'A valid 10-digit phone number is required.',
-            });
-        }
-
-        /*
-         * Force safe instructions on the server.
-         *
-         * This prevents the browser or applicant from enabling
-         * overwriting.
-         */
-        createResourceRequest.instructions = {
-            overwriteresource: false,
-            assigntoopportunity: jobCode,
-            assigntolist: 'short',
-            shortlistedby: 'resource',
-        };
-
-        /*
-         * Tracker credentials are added only on the server.
-         */
-        createResourceRequest.credentials = {
-            username:
-                process.env.TRACKERRMS_USERNAME,
-            password:
-                process.env.TRACKERRMS_PASSWORD,
-        };
-
-        /*
-         * Create or locate the resource and add it to Applied.
-         */
-        const resourceResponse = await axios.post(
-            'https://evoapius.tracker-rms.com/api/widget/createResource',
-            formData,
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            }
+        const requestedSource = cleanString(
+            incomingResource.source,
+            100
         );
+
+        const source = allowedSources.has(
+            requestedSource
+        )
+            ? requestedSource
+            : 'Website';
+
+        const linkedinValue = cleanString(
+            incomingResource.linkedin,
+            500
+        );
+
+        /*
+         * Only these permitted candidate fields are
+         * forwarded to Tracker.
+         */
+        const safeResource = {
+            firstname: firstName,
+            lastname: lastName,
+            fullname: fullName,
+
+            jobtitle: cleanString(
+                incomingResource.jobtitle,
+                150
+            ),
+
+            company: cleanString(
+                incomingResource.company,
+                150
+            ),
+
+            address1: cleanString(
+                incomingResource.address1,
+                200
+            ),
+
+            address2: cleanString(
+                incomingResource.address2,
+                200
+            ),
+
+            city: cleanString(
+                incomingResource.city,
+                100
+            ),
+
+            state: cleanString(
+                incomingResource.state,
+                100
+            ),
+
+            zipcode: cleanString(
+                incomingResource.zipcode,
+                25
+            ),
+
+            country: cleanString(
+                incomingResource.country,
+                100
+            ),
+
+            workphone: cleanString(
+                incomingResource.workphone,
+                30
+            ),
+
+            homephone: cleanString(
+                incomingResource.homephone,
+                30
+            ),
+
+            cellphone,
+            email,
+
+            /*
+             * Never send "N/A" as a LinkedIn URL.
+             */
+            linkedin:
+                linkedinValue.toLowerCase() ===
+                'n/a'
+                    ? ''
+                    : linkedinValue,
+
+            dateofbirth: cleanString(
+                incomingResource.dateofbirth,
+                25
+            ),
+
+            nationality: cleanString(
+                incomingResource.nationality,
+                100
+            ),
+
+            languages: cleanString(
+                incomingResource.languages,
+                250
+            ),
+
+            education: cleanString(
+                incomingResource.education,
+                250
+            ),
+
+            source,
+
+            jobhistory: sanitizeJobHistory(
+                incomingResource.jobhistory
+            ),
+
+            salary: cleanString(
+                incomingResource.salary,
+                50
+            ),
+
+            note: cleanString(
+                incomingResource.note,
+                4000
+            ),
+
+            image: cleanString(
+                incomingResource.image,
+                1000
+            ),
+
+            skills: cleanString(
+                incomingResource.skills,
+                1000
+            ),
+
+            status: cleanString(
+                incomingResource.status,
+                100
+            ),
+        };
+
+        /*
+         * The browser is never allowed to control
+         * the overwrite setting.
+         *
+         * The candidate is assigned to the job later
+         * through resourceApplication, preventing a
+         * duplicate assignment.
+         */
+        const safeCreateResourceData = {
+            trackerrms: {
+                createResource: {
+                    credentials:
+                        buildTrackerCredentials(),
+
+                    instructions: {
+                        overwriteresource: false,
+                    },
+
+                    resource: safeResource,
+                },
+            },
+        };
+
+        const resourceResponse =
+            await axios.post(
+                `${TRACKER_BASE_URL}/createResource`,
+                safeCreateResourceData,
+                {
+                    headers: {
+                        'Content-Type':
+                            'application/json',
+                    },
+                }
+            );
 
         const trackerResult =
             resourceResponse.data;
 
-        const trackerStatus = Number(
-            trackerResult?.status
-        );
+        const trackerStatus =
+            getTrackerStatus(trackerResult);
 
-        /*
-         * Log every property returned by Tracker.
-         */
+        const recordId =
+            getRecordId(trackerResult);
+
         console.log(
-            'COMPLETE TRACKER RESPONSE:',
-            JSON.stringify(trackerResult, null, 2)
+            'Tracker createResource response:',
+            JSON.stringify(
+                trackerResult,
+                null,
+                2
+            )
         );
 
         /*
-         * Accept:
+         * Use the applicant's local date and time
+         * supplied by the frontend.
+         */
+        const suppliedDateTime =
+            createResourceRequest.localDateTime ||
+            {};
+
+        const now = new Date();
+
+        const activityDate =
+            cleanString(
+                suppliedDateTime.date,
+                20
+            ) ||
+            now.toISOString().slice(0, 10);
+
+        const activityTime =
+            cleanString(
+                suppliedDateTime.time,
+                20
+            ) ||
+            now.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true,
+            });
+
+        const commonActivity = {
+            type: 'Email',
+            date: activityDate,
+            time: activityTime,
+            status: 'Completed',
+            priority: 'Medium',
+            contactType: 'Outbound',
+
+            note:
+                `Website application. ` +
+                `Source: ${source}`,
+
+            userId: TRACKER_USER_ID,
+        };
+
+        /*
+         * Status 3 means Tracker found an existing
+         * candidate and refused to overwrite that
+         * person's profile fields.
          *
-         * Status 0 = candidate created successfully.
-         * Status 3 = existing candidate found and not overwritten.
+         * If Tracker supplies the existing record ID,
+         * processing continues safely.
          *
-         * The assignment to Applied is included in the original
-         * createResource request.
+         * If Tracker does not supply a record ID,
+         * do not guess which candidate should receive
+         * the activity or résumé.
+         */
+        if (
+            trackerStatus === 3 &&
+            !recordId
+        ) {
+            const jobActivity =
+                await createActivity({
+                    ...commonActivity,
+
+                    subject:
+                        `${fullName} has applied.`,
+
+                    linkRecordType: 'O',
+                    linkRecordId: jobCode,
+                });
+
+            console.warn(
+                'Existing candidate found, but Tracker returned no record ID:',
+                {
+                    fullName,
+                    email,
+                    jobCode,
+
+                    trackerMessage:
+                        trackerResult?.message ||
+                        null,
+                }
+            );
+
+            /*
+             * The applicant still receives the normal
+             * success confirmation.
+             *
+             * The existing candidate is not modified
+             * because Tracker did not confirm an ID.
+             */
+            return res.status(200).json({
+                success: true,
+                submitted: true,
+
+                existingCandidateProtected:
+                    true,
+
+                candidateUpdated: false,
+                candidateRecordId: null,
+
+                resource: trackerResult,
+                jobActivity,
+            });
+        }
+
+        /*
+         * Allow:
+         *
+         * Status 0 — new candidate created.
+         * Status 3 — existing candidate found with
+         * a confirmed record ID.
          */
         if (
             trackerStatus !== 0 &&
@@ -187,222 +531,130 @@ app.post('/api/createResource', async (req, res) => {
         ) {
             return res.status(502).json({
                 success: false,
+
                 error:
                     'Tracker was unable to process the candidate.',
+
                 trackerStatus,
+
                 trackerMessage:
-                    trackerResult?.message || null,
+                    trackerResult?.message ||
+                    null,
+            });
+        }
+
+        if (
+            trackerStatus === 0 &&
+            !recordId
+        ) {
+            return res.status(502).json({
+                success: false,
+
+                error:
+                    'Tracker did not return a candidate record ID.',
             });
         }
 
         /*
-         * Extra safety check.
-         *
-         * Tracker should never say "updated" because overwrite
-         * protection is false.
+         * Tracker should not update candidate profile
+         * fields when overwrite protection is false.
          */
         if (
-            typeof trackerResult?.message === 'string' &&
+            trackerStatus === 0 &&
+            typeof trackerResult?.message ===
+                'string' &&
             trackerResult.message
                 .toLowerCase()
                 .includes('updated')
         ) {
-            console.error(
-                'Tracker unexpectedly updated a resource:',
-                JSON.stringify(trackerResult, null, 2)
-            );
-
             return res.status(409).json({
                 success: false,
+
                 error:
-                    'Tracker reported an unexpected candidate update. Processing stopped.',
+                    'Tracker unexpectedly reported that a candidate profile was updated.',
             });
         }
 
         /*
-         * Tracker may return the candidate ID under a different
-         * property name.
+         * Add the new or confirmed existing candidate
+         * to the job's Applied shortlist.
          */
-        const recordId =
-            trackerResult?.recordId ||
-            trackerResult?.recordid ||
-            trackerResult?.resourceId ||
-            trackerResult?.resourceid ||
-            trackerResult?.ResourceId ||
-            trackerResult?.ResourceID ||
-            trackerResult?.id ||
-            trackerResult?.Id ||
-            null;
-
-        console.log('Resolved candidate record ID:', {
-            recordId,
-            trackerStatus,
-            jobCode,
-            fullName,
-            email,
-        });
-
-        /*
-         * Use the applicant's local date and time when available.
-         */
-        const submittedDateTime =
-            createResourceRequest.localDateTime || {};
-
-        const currentDate = new Date();
-
-        const activityDate =
-            submittedDateTime.date ||
-            currentDate.toISOString().slice(0, 10);
-
-        const activityTime =
-            submittedDateTime.time ||
-            currentDate.toISOString().slice(11, 16);
-
-        const authHeader =
-            'Basic ' +
-            Buffer.from(
-                `${process.env.TRACKERRMS_USERNAME}:${process.env.TRACKERRMS_PASSWORD}`
-            ).toString('base64');
-
-        /*
-         * Create the job activity first.
-         *
-         * This activity does not require the candidate record ID.
-         */
-        const jobActivityData = {
+        const resourceApplicationData = {
             trackerrms: {
-                createActivity: {
-                    activity: {
-                        subject:
-                            `${fullName} has applied.`,
-                        type: 'Email',
-                        date: activityDate,
-                        time: activityTime,
-                        status: 'Completed',
-                        priority: 'Medium',
-                        contactType: 'Outbound',
-                        note:
-                            'Associated with website application',
-                        linkRecordType: 'O',
-                        linkRecordId: jobCode,
-                        userId: 3714,
+                resourceApplication: {
+                    credentials:
+                        buildTrackerCredentials(),
+
+                    instructions: {
+                        opportunityid: jobCode,
+                        resourceid: recordId,
+                        assigntolist: 'short',
+                        shortlistedby: 'resource',
+                        source,
                     },
                 },
             },
         };
 
-        const jobActivityResponse =
+        const resourceApplicationResponse =
             await axios.post(
-                'https://evoapius.tracker-rms.com/api/widget/createActivity',
-                jobActivityData,
+                `${TRACKER_BASE_URL}/resourceApplication`,
+                resourceApplicationData,
                 {
                     headers: {
                         'Content-Type':
                             'application/json',
-                        Authorization: authHeader,
                     },
                 }
             );
 
         if (
-            trackerResponseFailed(
-                jobActivityResponse.data
+            !trackerSucceeded(
+                resourceApplicationResponse.data
             )
         ) {
             throw new Error(
-                jobActivityResponse.data.message ||
-                'The job activity could not be created.'
+                resourceApplicationResponse
+                    .data?.message ||
+                    'Tracker could not add the candidate to the Applied shortlist.'
             );
         }
 
-        console.log('Job activity created:', {
-            jobCode,
-            fullName,
-            response: jobActivityResponse.data,
-        });
-
         /*
-         * The candidate-profile activity requires a candidate
-         * record ID.
+         * Add the application activity to the
+         * candidate's profile.
          */
-        let candidateActivityResponse = null;
+        const candidateActivity =
+            await createActivity({
+                ...commonActivity,
 
-        if (recordId) {
-            const candidateActivityData = {
-                trackerrms: {
-                    createActivity: {
-                        activity: {
-                            subject:
-                                `Filled out application for job ${jobCode}.`,
-                            type: 'Email',
-                            date: activityDate,
-                            time: activityTime,
-                            status: 'Completed',
-                            priority: 'Medium',
-                            contactType: 'Outbound',
-                            note:
-                                'Associated with website application',
-                            linkRecordType: 'R',
-                            linkRecordId: recordId,
-                            userId: 3714,
-                        },
-                    },
-                },
-            };
+                subject:
+                    `Filled out application for job ${jobCode}.`,
 
-            candidateActivityResponse =
-                await axios.post(
-                    'https://evoapius.tracker-rms.com/api/widget/createActivity',
-                    candidateActivityData,
-                    {
-                        headers: {
-                            'Content-Type':
-                                'application/json',
-                            Authorization: authHeader,
-                        },
-                    }
-                );
-
-            if (
-                trackerResponseFailed(
-                    candidateActivityResponse.data
-                )
-            ) {
-                throw new Error(
-                    candidateActivityResponse.data
-                        .message ||
-                    'The candidate activity could not be created.'
-                );
-            }
-
-            console.log(
-                'Candidate activity created:',
-                {
-                    recordId,
-                    jobCode,
-                    response:
-                        candidateActivityResponse.data,
-                }
-            );
-        } else {
-            console.warn(
-                'Candidate activity skipped because Tracker did not return a candidate record ID:',
-                {
-                    trackerStatus,
-                    jobCode,
-                    fullName,
-                    email,
-                }
-            );
-        }
+                linkRecordType: 'R',
+                linkRecordId: recordId,
+            });
 
         /*
-         * Attach the résumé only when Tracker returns a confirmed
-         * candidate record ID.
+         * Add the application activity to the job.
+         */
+        const jobActivity =
+            await createActivity({
+                ...commonActivity,
+
+                subject:
+                    `${fullName} has applied.`,
+
+                linkRecordType: 'O',
+                linkRecordId: jobCode,
+            });
+
+        /*
+         * Attach the submitted résumé to the candidate.
          */
         let documentResponse = null;
 
-        if (documentData && recordId) {
+        if (documentData) {
             const attachDocumentRequest =
                 documentData?.trackerrms
                     ?.attachDocument;
@@ -415,7 +667,8 @@ app.post('/api/createResource', async (req, res) => {
                 !uploadedFile ||
                 typeof uploadedFile.filename !==
                     'string' ||
-                typeof uploadedFile.data !== 'string'
+                typeof uploadedFile.data !==
+                    'string'
             ) {
                 throw new Error(
                     'The résumé information is invalid.'
@@ -432,129 +685,157 @@ app.post('/api/createResource', async (req, res) => {
                 );
             }
 
-            const fileSize = Buffer.byteLength(
-                uploadedFile.data,
-                'base64'
-            );
+            const decodedSize =
+                Buffer.byteLength(
+                    uploadedFile.data,
+                    'base64'
+                );
 
             const maximumFileSize =
                 10 * 1024 * 1024;
 
             if (
-                fileSize < 1 ||
-                fileSize > maximumFileSize
+                decodedSize < 1 ||
+                decodedSize >
+                    maximumFileSize
             ) {
                 throw new Error(
                     'The résumé must be smaller than 10 MB.'
                 );
             }
 
-            attachDocumentRequest.credentials = {
-                username:
-                    process.env.TRACKERRMS_USERNAME,
-                password:
-                    process.env.TRACKERRMS_PASSWORD,
+            const safeDocumentData = {
+                trackerrms: {
+                    attachDocument: {
+                        credentials:
+                            buildTrackerCredentials(),
+
+                        file: {
+                            filename:
+                                cleanString(
+                                    uploadedFile.filename,
+                                    255
+                                ),
+
+                            recordType: 'R',
+                            recordId,
+                            documentType: 'resume',
+
+                            /*
+                             * This tells Tracker the
+                             * uploaded document is a résumé.
+                             * Existing documents are not
+                             * deleted by this code.
+                             */
+                            primary: 'R',
+
+                            data:
+                                uploadedFile.data,
+                        },
+                    },
+                },
             };
 
-            attachDocumentRequest.file.recordId =
-                recordId;
-
-            attachDocumentRequest.file.recordType =
-                'R';
-
-            attachDocumentRequest.file.documentType =
-                'resume';
-
-            attachDocumentRequest.file.primary = 'R';
-
-            documentResponse = await axios.post(
-                'https://evoapius.tracker-rms.com/api/widget/attachDocument',
-                documentData,
-                {
-                    headers: {
-                        'Content-Type':
-                            'application/json',
-                    },
-                }
-            );
+            const documentApiResponse =
+                await axios.post(
+                    `${TRACKER_BASE_URL}/attachDocument`,
+                    safeDocumentData,
+                    {
+                        headers: {
+                            'Content-Type':
+                                'application/json',
+                        },
+                    }
+                );
 
             if (
-                trackerResponseFailed(
-                    documentResponse.data
+                !trackerSucceeded(
+                    documentApiResponse.data
                 )
             ) {
                 throw new Error(
-                    documentResponse.data.message ||
-                    'The résumé could not be attached.'
+                    documentApiResponse.data
+                        ?.message ||
+                        'Tracker could not attach the résumé.'
                 );
             }
 
-            console.log('Résumé attached:', {
-                recordId,
-                filename: uploadedFile.filename,
-                response: documentResponse.data,
-            });
-        } else if (documentData && !recordId) {
-            console.warn(
-                'Résumé attachment skipped because Tracker did not return a candidate record ID:',
-                {
-                    trackerStatus,
-                    jobCode,
-                    fullName,
-                    email,
-                }
-            );
+            documentResponse =
+                documentApiResponse.data;
         }
 
-        console.log('Application completed:', {
-            trackerStatus,
-            recordId,
-            jobCode,
-            fullName,
-            email,
-            jobActivityCreated: true,
-            candidateActivityCreated:
-                Boolean(candidateActivityResponse),
-            documentAttached:
-                Boolean(documentResponse),
-        });
+        console.log(
+            'Website application completed:',
+            {
+                fullName,
+                email,
+                jobCode,
+                recordId,
+                source,
 
-        /*
-         * Return success to the website.
-         *
-         * The applicant receives the normal success toast.
-         */
+                existingCandidate:
+                    trackerStatus === 3,
+
+                documentAttached:
+                    Boolean(
+                        documentResponse
+                    ),
+            }
+        );
+
         return res.status(200).json({
             success: true,
             submitted: true,
-            resource: trackerResult,
-            jobActivity: jobActivityResponse.data,
-            candidateActivity:
-                candidateActivityResponse
-                    ? candidateActivityResponse.data
-                    : null,
-            document: documentResponse
-                ? documentResponse.data
-                : null,
+
+            existingCandidateMatched:
+                trackerStatus === 3,
+
+            profileFieldsOverwritten:
+                false,
+
             candidateRecordId:
-                recordId || null,
+                recordId,
+
+            resource:
+                trackerResult,
+
+            resourceApplication:
+                resourceApplicationResponse.data,
+
+            candidateActivity,
+            jobActivity,
+
+            document:
+                documentResponse,
         });
     } catch (error) {
-        console.error('Application error:', {
-            message: error.message,
-            trackerDetails:
-                error.response?.data || null,
-            httpStatus:
-                error.response?.status || null,
-        });
+        console.error(
+            'Application error:',
+            {
+                message:
+                    error.message,
+
+                trackerDetails:
+                    error.response?.data ||
+                    null,
+
+                httpStatus:
+                    error.response?.status ||
+                    null,
+            }
+        );
 
         return res.status(500).json({
             success: false,
+
             error:
                 'The application could not be completed.',
+
             details:
-                error.response?.data ||
-                { message: error.message },
+                error.response?.data || {
+                    message:
+                        error.message,
+                },
         });
     }
 });
