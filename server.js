@@ -10,6 +10,7 @@ const port = process.env.PORT || 3000;
 
 const TRACKER_BASE_URL =
     'https://evoapius.tracker-rms.com/api/widget';
+
 const TRACKER_USER_ID = 3714;
 const MAXIMUM_RESUME_SIZE = 10 * 1024 * 1024;
 
@@ -54,9 +55,12 @@ function getRecordId(data) {
 
 function buildResumeCredentials() {
     return {
-        username: process.env.TRACKERRMS_USERNAME,
-        password: process.env.TRACKERRMS_PASSWORD,
-        apikey: process.env.TRACKERRMS_API_KEY,
+        username:
+            process.env.TRACKERRMS_USERNAME,
+        password:
+            process.env.TRACKERRMS_PASSWORD,
+        apikey:
+            process.env.TRACKERRMS_API_KEY,
     };
 }
 
@@ -71,11 +75,13 @@ function buildBasicAuthorizationHeader() {
 
 function validateResume(documentData) {
     const uploadedFile =
-        documentData?.trackerrms?.attachDocument?.file;
+        documentData?.trackerrms
+            ?.attachDocument?.file;
 
     if (
         !uploadedFile ||
-        typeof uploadedFile.filename !== 'string' ||
+        typeof uploadedFile.filename !==
+            'string' ||
         typeof uploadedFile.data !== 'string'
     ) {
         return {
@@ -88,6 +94,7 @@ function validateResume(documentData) {
         uploadedFile.filename,
         255
     );
+
     const data = uploadedFile.data.trim();
 
     if (
@@ -144,7 +151,8 @@ async function createActivity(activity) {
         },
         {
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type':
+                    'application/json',
                 Authorization:
                     buildBasicAuthorizationHeader(),
             },
@@ -161,417 +169,467 @@ async function createActivity(activity) {
     return response.data;
 }
 
-app.post('/api/createResource', async (req, res) => {
-    try {
-        if (
-            !process.env.TRACKERRMS_USERNAME ||
-            !process.env.TRACKERRMS_PASSWORD ||
-            !process.env.TRACKERRMS_API_KEY
-        ) {
-            throw new Error(
-                'Tracker username, password, or API key is not configured.'
+app.post(
+    '/api/createResource',
+    async (req, res) => {
+        try {
+            if (
+                !process.env
+                    .TRACKERRMS_USERNAME ||
+                !process.env
+                    .TRACKERRMS_PASSWORD ||
+                !process.env
+                    .TRACKERRMS_API_KEY
+            ) {
+                throw new Error(
+                    'Tracker username, password, or API key is not configured.'
+                );
+            }
+
+            const createResourceRequest =
+                req.body?.formData?.trackerrms
+                    ?.createResource;
+
+            const documentData =
+                req.body?.documentData;
+
+            if (
+                !createResourceRequest?.resource
+            ) {
+                return res
+                    .status(400)
+                    .json({
+                        success: false,
+                        error:
+                            'Application information is missing.',
+                    });
+            }
+
+            const incomingResource =
+                createResourceRequest.resource;
+
+            const firstName = cleanString(
+                incomingResource.firstname,
+                100
             );
-        }
 
-        const createResourceRequest =
-            req.body?.formData?.trackerrms
-                ?.createResource;
-        const documentData =
-            req.body?.documentData;
+            const lastName = cleanString(
+                incomingResource.lastname,
+                100
+            );
 
-        if (!createResourceRequest?.resource) {
-            return res.status(400).json({
-                success: false,
-                error:
-                    'Application information is missing.',
-            });
-        }
+            const fullName =
+                `${firstName} ${lastName}`.trim();
 
-        const incomingResource =
-            createResourceRequest.resource;
+            const email = cleanString(
+                incomingResource.email,
+                254
+            );
 
-        const firstName = cleanString(
-            incomingResource.firstname,
-            100
-        );
+            const cellphone = cleanString(
+                incomingResource.cellphone,
+                30
+            ).replace(/\D/g, '');
 
-        const lastName = cleanString(
-            incomingResource.lastname,
-            100
-        );
+            const jobCode = Number(
+                createResourceRequest
+                    ?.instructions
+                    ?.assigntoopportunity
+            );
 
-        const fullName =
-            `${firstName} ${lastName}`.trim();
+            if (!firstName || !lastName) {
+                return res
+                    .status(400)
+                    .json({
+                        success: false,
+                        error:
+                            'First name and last name are required.',
+                    });
+            }
 
-        const email = cleanString(
-            incomingResource.email,
-            254
-        );
+            if (
+                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+                    email
+                )
+            ) {
+                return res
+                    .status(400)
+                    .json({
+                        success: false,
+                        error:
+                            'A valid email address is required.',
+                    });
+            }
 
-        const cellphone = cleanString(
-            incomingResource.cellphone,
-            30
-        ).replace(/\D/g, '');
+            if (cellphone.length !== 10) {
+                return res
+                    .status(400)
+                    .json({
+                        success: false,
+                        error:
+                            'A valid 10-digit mobile phone number is required.',
+                    });
+            }
 
-        const jobCode = Number(
-            createResourceRequest?.instructions
-                ?.assigntoopportunity
-        );
+            if (
+                !Number.isInteger(jobCode) ||
+                jobCode <= 0
+            ) {
+                return res
+                    .status(400)
+                    .json({
+                        success: false,
+                        error:
+                            'A valid job code was not provided.',
+                    });
+            }
 
-        if (!firstName || !lastName) {
-            return res.status(400).json({
-                success: false,
-                error:
-                    'First name and last name are required.',
-            });
-        }
+            const allowedSources = new Set([
+                'Website',
+                'Google',
+                'Dice',
+                'Indeed',
+                'LinkedIn',
+                'CareerBuilder Database Search',
+                'Referral',
+                'Other',
+            ]);
 
-        if (
-            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-                email
-            )
-        ) {
-            return res.status(400).json({
-                success: false,
-                error:
-                    'A valid email address is required.',
-            });
-        }
+            const requestedSource =
+                cleanString(
+                    incomingResource.source,
+                    100
+                );
 
-        if (cellphone.length !== 10) {
-            return res.status(400).json({
-                success: false,
-                error:
-                    'A valid 10-digit mobile phone number is required.',
-            });
-        }
+            const source =
+                allowedSources.has(
+                    requestedSource
+                )
+                    ? requestedSource
+                    : 'Website';
 
-        if (
-            !Number.isInteger(jobCode) ||
-            jobCode <= 0
-        ) {
-            return res.status(400).json({
-                success: false,
-                error:
-                    'A valid job code was not provided.',
-            });
-        }
+            const resume =
+                validateResume(documentData);
 
-        const allowedSources = new Set([
-            'Website',
-            'Google',
-            'Dice',
-            'Indeed',
-            'LinkedIn',
-            'CareerBuilder Database Search',
-            'Referral',
-            'Other',
-        ]);
+            if (!resume.valid) {
+                return res
+                    .status(400)
+                    .json({
+                        success: false,
+                        error: resume.error,
+                    });
+            }
 
-        const requestedSource = cleanString(
-            incomingResource.source,
-            100
-        );
+            /*
+             * Only send fields that the applicant
+             * actually entered.
+             *
+             * Blank address, employment-history,
+             * status, company, and other profile
+             * fields are not submitted.
+             */
+            const safeResource = {
+                firstname: firstName,
+                lastname: lastName,
+                fullname: fullName,
+                email,
+                cellphone,
+                source,
+            };
 
-        const source = allowedSources.has(
-            requestedSource
-        )
-            ? requestedSource
-            : 'Website';
+            const linkedin = cleanString(
+                incomingResource.linkedin,
+                500
+            );
 
-        const resume =
-            validateResume(documentData);
+            if (
+                linkedin &&
+                linkedin.toLowerCase() !== 'n/a'
+            ) {
+                safeResource.linkedin =
+                    linkedin;
+            }
 
-        if (!resume.valid) {
-            return res.status(400).json({
-                success: false,
-                error: resume.error,
-            });
-        }
+            /*
+             * createResourceFromResume handles:
+             *
+             * - Candidate matching
+             * - Candidate creation
+             * - Resume parsing/storage
+             * - Job assignment
+             * - Applied shortlist placement
+             */
+            const createFromResumeData = {
+                trackerrms: {
+                    createResourceFromResume: {
+                        credentials:
+                            buildResumeCredentials(),
 
-        /*
-         * Only send essential applicant fields.
-         *
-         * Blank address, employment-history,
-         * status, company, and other profile
-         * fields are not sent. This prevents
-         * blank browser fields from replacing
-         * useful candidate information.
-         */
-        const safeResource = {
-            firstname: firstName,
-            lastname: lastName,
-            fullname: fullName,
-            email,
-            cellphone,
-            source,
-        };
+                        instructions: {
+                            assigntoopportunity:
+                                jobCode,
+                            assigntolist:
+                                'short',
+                            shortlistedby:
+                                'resource',
+                        },
 
-        const linkedin = cleanString(
-            incomingResource.linkedin,
-            500
-        );
+                        resource:
+                            safeResource,
 
-        if (
-            linkedin &&
-            linkedin.toLowerCase() !== 'n/a'
-        ) {
-            safeResource.linkedin = linkedin;
-        }
-
-        /*
-         * This call:
-         *
-         * 1. Checks for an existing candidate.
-         * 2. Creates or matches the candidate.
-         * 3. Parses and stores the résumé.
-         * 4. Assigns the candidate to the job.
-         * 5. Places them in Applied.
-         *
-         * The undocumented overwriteresource
-         * property is intentionally not included.
-         */
-        const createFromResumeData = {
-            trackerrms: {
-                createResourceFromResume: {
-                    credentials:
-                        buildResumeCredentials(),
-
-                    instructions: {
-                        assigntoopportunity:
-                            jobCode,
-                        assigntolist: 'short',
-                        shortlistedby: 'resource',
-                    },
-
-                    resource: safeResource,
-
-                    file: {
-                        filename: resume.filename,
-                        data: resume.data,
+                        file: {
+                            filename:
+                                resume.filename,
+                            data: resume.data,
+                        },
                     },
                 },
-            },
-        };
+            };
 
-        const resourceResponse =
-            await axios.post(
-                `${TRACKER_BASE_URL}/createResourceFromResume`,
-                createFromResumeData,
-                {
-                    headers: {
-                        'Content-Type':
-                            'application/json',
-                    },
-                }
+            const resourceResponse =
+                await axios.post(
+                    `${TRACKER_BASE_URL}/createResourceFromResume`,
+                    createFromResumeData,
+                    {
+                        headers: {
+                            'Content-Type':
+                                'application/json',
+                        },
+                    }
+                );
+
+            const trackerResult =
+                resourceResponse.data;
+
+            const trackerStatus =
+                getTrackerStatus(
+                    trackerResult
+                );
+
+            const recordId =
+                getRecordId(trackerResult);
+
+            console.log(
+                'Tracker createResourceFromResume response:',
+                JSON.stringify(
+                    trackerResult,
+                    null,
+                    2
+                )
             );
 
-        const trackerResult =
-            resourceResponse.data;
+            const suppliedDateTime =
+                createResourceRequest
+                    .localDateTime || {};
 
-        const trackerStatus =
-            getTrackerStatus(trackerResult);
+            const now = new Date();
 
-        const recordId =
-            getRecordId(trackerResult);
+            const activityDate =
+                cleanString(
+                    suppliedDateTime.date,
+                    20
+                ) ||
+                now
+                    .toISOString()
+                    .slice(0, 10);
 
-        console.log(
-            'Tracker createResourceFromResume response:',
-            JSON.stringify(
-                trackerResult,
-                null,
-                2
-            )
-        );
+            const activityTime =
+                cleanString(
+                    suppliedDateTime.time,
+                    20
+                ) ||
+                now
+                    .toISOString()
+                    .slice(11, 16);
 
-        const suppliedDateTime =
-            createResourceRequest.localDateTime ||
-            {};
+            const commonActivity = {
+                type: 'Email',
+                date: activityDate,
+                time: activityTime,
+                status: 'Completed',
+                priority: 'Medium',
+                contactType: 'Outbound',
+                note:
+                    `Website application. Source: ${source}`,
+                userId: TRACKER_USER_ID,
+            };
 
-        const now = new Date();
+            /*
+             * Status 3 means Tracker found an
+             * existing candidate and protected
+             * the record from being overwritten.
+             */
+            if (
+                trackerStatus === 3 &&
+                !recordId
+            ) {
+                const jobActivity =
+                    await createActivity({
+                        ...commonActivity,
+                        subject:
+                            `${fullName} has applied.`,
+                        linkRecordType: 'O',
+                        linkRecordId:
+                            jobCode,
+                    });
 
-        const activityDate =
-            cleanString(
-                suppliedDateTime.date,
-                20
-            ) ||
-            now.toISOString().slice(0, 10);
+                console.warn(
+                    'Tracker protected an existing candidate but returned no record ID:',
+                    {
+                        fullName,
+                        email,
+                        jobCode,
+                        trackerMessage:
+                            trackerResult
+                                ?.message ||
+                            null,
+                    }
+                );
 
-        const activityTime =
-            cleanString(
-                suppliedDateTime.time,
-                20
-            ) ||
-            now.toISOString().slice(11, 16);
+                return res
+                    .status(200)
+                    .json({
+                        success: true,
+                        submitted: true,
+                        existingCandidateProtected:
+                            true,
+                        candidateRecordId:
+                            null,
+                        resource:
+                            trackerResult,
+                        jobActivity,
+                    });
+            }
 
-        const commonActivity = {
-            type: 'Email',
-            date: activityDate,
-            time: activityTime,
-            status: 'Completed',
-            priority: 'Medium',
-            contactType: 'Outbound',
-            note:
-                `Website application. Source: ${source}`,
-            userId: TRACKER_USER_ID,
-        };
+            if (
+                trackerStatus !== 0 &&
+                trackerStatus !== 3
+            ) {
+                return res
+                    .status(502)
+                    .json({
+                        success: false,
+                        error:
+                            'Tracker was unable to process the application.',
+                        trackerStatus,
+                        trackerMessage:
+                            trackerResult
+                                ?.message ||
+                            null,
+                    });
+            }
 
-        /*
-         * Status 3 means Tracker protected an
-         * existing candidate from being overwritten.
-         *
-         * If Tracker does not return the candidate
-         * ID, create the job activity but do not
-         * guess which candidate profile should
-         * receive an activity.
-         */
-        if (
-            trackerStatus === 3 &&
-            !recordId
-        ) {
+            if (!recordId) {
+                return res
+                    .status(502)
+                    .json({
+                        success: false,
+                        error:
+                            'Tracker did not return a candidate record ID.',
+                        trackerStatus,
+                        trackerMessage:
+                            trackerResult
+                                ?.message ||
+                            null,
+                    });
+            }
+
+            /*
+             * Do not call resourceApplication
+             * or attachDocument again.
+             *
+             * createResourceFromResume has
+             * already performed those operations.
+             */
+
+            const candidateActivity =
+                await createActivity({
+                    ...commonActivity,
+                    subject:
+                        `Filled out application for job ${jobCode}.`,
+                    linkRecordType: 'R',
+                    linkRecordId:
+                        recordId,
+                });
+
             const jobActivity =
                 await createActivity({
                     ...commonActivity,
                     subject:
                         `${fullName} has applied.`,
                     linkRecordType: 'O',
-                    linkRecordId: jobCode,
+                    linkRecordId:
+                        jobCode,
                 });
 
-            console.warn(
-                'Tracker protected an existing candidate but returned no record ID:',
+            console.log(
+                'Website application completed:',
                 {
                     fullName,
                     email,
                     jobCode,
+                    recordId,
+                    source,
                     trackerMessage:
-                        trackerResult?.message ||
+                        trackerResult
+                            ?.message ||
+                        null,
+                    candidateActivityCreated:
+                        true,
+                    jobActivityCreated:
+                        true,
+                }
+            );
+
+            return res
+                .status(200)
+                .json({
+                    success: true,
+                    submitted: true,
+                    candidateRecordId:
+                        recordId,
+                    resource:
+                        trackerResult,
+                    shortlistHandledBy:
+                        'createResourceFromResume',
+                    documentHandledBy:
+                        'createResourceFromResume',
+                    candidateActivity,
+                    jobActivity,
+                });
+        } catch (error) {
+            console.error(
+                'Application error:',
+                {
+                    message:
+                        error.message,
+                    trackerDetails:
+                        error.response
+                            ?.data ||
+                        null,
+                    httpStatus:
+                        error.response
+                            ?.status ||
                         null,
                 }
             );
 
-            return res.status(200).json({
-                success: true,
-                submitted: true,
-                existingCandidateProtected:
-                    true,
-                candidateRecordId: null,
-                resource: trackerResult,
-                jobActivity,
-            });
+            return res
+                .status(500)
+                .json({
+                    success: false,
+                    error:
+                        'The application could not be completed.',
+                    details:
+                        error.response
+                            ?.data || {
+                            message:
+                                error.message,
+                        },
+                });
         }
-
-        if (
-            trackerStatus !== 0 &&
-            trackerStatus !== 3
-        ) {
-            return res.status(502).json({
-                success: false,
-                error:
-                    'Tracker was unable to process the application.',
-                trackerStatus,
-                trackerMessage:
-                    trackerResult?.message ||
-                    null,
-            });
-        }
-
-        if (!recordId) {
-            return res.status(502).json({
-                success: false,
-                error:
-                    'Tracker did not return a candidate record ID.',
-                trackerStatus,
-                trackerMessage:
-                    trackerResult?.message ||
-                    null,
-            });
-        }
-
-        /*
-         * createResourceFromResume already handles:
-         *
-         * - Candidate matching
-         * - Resume storage
-         * - Job assignment
-         * - Applied shortlist placement
-         *
-         * Do not call resourceApplication or
-         * attachDocument again.
-         */
-
-        const candidateActivity =
-            await createActivity({
-                ...commonActivity,
-                subject:
-                    `Filled out application for job ${jobCode}.`,
-                linkRecordType: 'R',
-                linkRecordId: recordId,
-            });
-
-        const jobActivity =
-            await createActivity({
-                ...commonActivity,
-                subject:
-                    `${fullName} has applied.`,
-                linkRecordType: 'O',
-                linkRecordId: jobCode,
-            });
-
-        console.log(
-            'Website application completed:',
-            {
-                fullName,
-                email,
-                jobCode,
-                recordId,
-                source,
-                trackerMessage:
-                    trackerResult?.message ||
-                    null,
-                candidateActivityCreated:
-                    true,
-                jobActivityCreated: true,
-            }
-        );
-
-        return res.status(200).json({
-            success: true,
-            submitted: true,
-            candidateRecordId: recordId,
-            resource: trackerResult,
-            shortlistHandledBy:
-                'createResourceFromResume',
-            documentHandledBy:
-                'createResourceFromResume',
-            candidateActivity,
-            jobActivity,
-        });
-    } catch (error) {
-        console.error(
-            'Application error:',
-            {
-                message: error.message,
-                trackerDetails:
-                    error.response?.data ||
-                    null,
-                httpStatus:
-                    error.response?.status ||
-                    null,
-            }
-        );
-
-        return res.status(500).json({
-            success: false,
-            error:
-                'The application could not be completed.',
-            details:
-                error.response?.data || {
-                    message: error.message,
-                },
-        });
     }
-});
+);
 
 app.listen(port, () => {
     console.log(
