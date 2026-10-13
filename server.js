@@ -519,20 +519,18 @@ app.post(
                     });
             }
 
-            if (!recordId) {
-                return res
-                    .status(502)
-                    .json({
-                        success: false,
-                        error:
-                            'Tracker did not return a candidate record ID.',
-                        trackerStatus,
-                        trackerMessage:
-                            trackerResult
-                                ?.message ||
-                            null,
-                    });
-            }
+if (!recordId) {
+    return res.status(502).json({
+        success: false,
+        error:
+            `We could not complete your application for job ${jobCode}. ` +
+            'Please email your résumé to contactus@partnersinstaffing.com ' +
+            'and include your full name, phone number, and the job you are applying for.',
+        trackerStatus,
+        trackerMessage:
+            trackerResult?.message || null,
+    });
+}
 
             /*
              * Do not call resourceApplication
