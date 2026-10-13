@@ -55,12 +55,9 @@ function getRecordId(data) {
 
 function buildResumeCredentials() {
     return {
-        username:
-            process.env.TRACKERRMS_USERNAME,
-        password:
-            process.env.TRACKERRMS_PASSWORD,
-        apikey:
-            process.env.TRACKERRMS_API_KEY,
+        username: process.env.TRACKERRMS_USERNAME,
+        password: process.env.TRACKERRMS_PASSWORD,
+        apikey: process.env.TRACKERRMS_API_KEY,
     };
 }
 
@@ -75,13 +72,11 @@ function buildBasicAuthorizationHeader() {
 
 function validateResume(documentData) {
     const uploadedFile =
-        documentData?.trackerrms
-            ?.attachDocument?.file;
+        documentData?.trackerrms?.attachDocument?.file;
 
     if (
         !uploadedFile ||
-        typeof uploadedFile.filename !==
-            'string' ||
+        typeof uploadedFile.filename !== 'string' ||
         typeof uploadedFile.data !== 'string'
     ) {
         return {
@@ -151,8 +146,7 @@ async function createActivity(activity) {
         },
         {
             headers: {
-                'Content-Type':
-                    'application/json',
+                'Content-Type': 'application/json',
                 Authorization:
                     buildBasicAuthorizationHeader(),
             },
@@ -174,12 +168,9 @@ app.post(
     async (req, res) => {
         try {
             if (
-                !process.env
-                    .TRACKERRMS_USERNAME ||
-                !process.env
-                    .TRACKERRMS_PASSWORD ||
-                !process.env
-                    .TRACKERRMS_API_KEY
+                !process.env.TRACKERRMS_USERNAME ||
+                !process.env.TRACKERRMS_PASSWORD ||
+                !process.env.TRACKERRMS_API_KEY
             ) {
                 throw new Error(
                     'Tracker username, password, or API key is not configured.'
@@ -196,13 +187,11 @@ app.post(
             if (
                 !createResourceRequest?.resource
             ) {
-                return res
-                    .status(400)
-                    .json({
-                        success: false,
-                        error:
-                            'Application information is missing.',
-                    });
+                return res.status(400).json({
+                    success: false,
+                    error:
+                        'Application information is missing.',
+                });
             }
 
             const incomingResource =
@@ -238,13 +227,11 @@ app.post(
             );
 
             if (!firstName || !lastName) {
-                return res
-                    .status(400)
-                    .json({
-                        success: false,
-                        error:
-                            'First name and last name are required.',
-                    });
+                return res.status(400).json({
+                    success: false,
+                    error:
+                        'First name and last name are required.',
+                });
             }
 
             if (
@@ -252,36 +239,30 @@ app.post(
                     email
                 )
             ) {
-                return res
-                    .status(400)
-                    .json({
-                        success: false,
-                        error:
-                            'A valid email address is required.',
-                    });
+                return res.status(400).json({
+                    success: false,
+                    error:
+                        'A valid email address is required.',
+                });
             }
 
             if (cellphone.length !== 10) {
-                return res
-                    .status(400)
-                    .json({
-                        success: false,
-                        error:
-                            'A valid 10-digit mobile phone number is required.',
-                    });
+                return res.status(400).json({
+                    success: false,
+                    error:
+                        'A valid 10-digit mobile phone number is required.',
+                });
             }
 
             if (
                 !Number.isInteger(jobCode) ||
                 jobCode <= 0
             ) {
-                return res
-                    .status(400)
-                    .json({
-                        success: false,
-                        error:
-                            'A valid job code was not provided.',
-                    });
+                return res.status(400).json({
+                    success: false,
+                    error:
+                        'A valid job code was not provided.',
+                });
             }
 
             const allowedSources = new Set([
@@ -312,21 +293,15 @@ app.post(
                 validateResume(documentData);
 
             if (!resume.valid) {
-                return res
-                    .status(400)
-                    .json({
-                        success: false,
-                        error: resume.error,
-                    });
+                return res.status(400).json({
+                    success: false,
+                    error: resume.error,
+                });
             }
 
             /*
-             * Only send fields that the applicant
-             * actually entered.
-             *
-             * Blank address, employment-history,
-             * status, company, and other profile
-             * fields are not submitted.
+             * Only send candidate fields that
+             * the applicant actually entered.
              */
             const safeResource = {
                 firstname: firstName,
@@ -355,7 +330,7 @@ app.post(
              *
              * - Candidate matching
              * - Candidate creation
-             * - Resume parsing/storage
+             * - Résumé parsing and storage
              * - Job assignment
              * - Applied shortlist placement
              */
@@ -374,8 +349,7 @@ app.post(
                                 'resource',
                         },
 
-                        resource:
-                            safeResource,
+                        resource: safeResource,
 
                         file: {
                             filename:
@@ -474,70 +448,142 @@ app.post(
                     });
 
                 console.warn(
-                    'Tracker protected an existing candidate but returned no record ID:',
-                    {
+                    'TRACKER_EXISTING_CANDIDATE_PROTECTED',
+                    JSON.stringify({
+                        timestamp:
+                            new Date().toISOString(),
                         fullName,
                         email,
+                        cellphone,
                         jobCode,
-                        trackerMessage:
-                            trackerResult
-                                ?.message ||
-                            null,
-                    }
-                );
-
-                return res
-                    .status(200)
-                    .json({
-                        success: true,
-                        submitted: true,
-                        existingCandidateProtected:
-                            true,
-                        candidateRecordId:
-                            null,
-                        resource:
-                            trackerResult,
-                        jobActivity,
-                    });
-            }
-
-            if (
-                trackerStatus !== 0 &&
-                trackerStatus !== 3
-            ) {
-                return res
-                    .status(502)
-                    .json({
-                        success: false,
-                        error:
-                            'Tracker was unable to process the application.',
+                        source,
+                        resumeFilename:
+                            resume.filename,
+                        resumeSizeBytes:
+                            Buffer.byteLength(
+                                resume.data,
+                                'base64'
+                            ),
                         trackerStatus,
                         trackerMessage:
                             trackerResult
                                 ?.message ||
                             null,
-                    });
+                    })
+                );
+
+                return res.status(200).json({
+                    success: true,
+                    submitted: true,
+                    existingCandidateProtected:
+                        true,
+                    candidateRecordId: null,
+                    resource: trackerResult,
+                    jobActivity,
+                });
             }
 
-if (!recordId) {
-    return res.status(502).json({
-        success: false,
-        error:
-            `We could not complete your application for job ${jobCode}. ` +
-            'Please email your résumé to contactus@partnersinstaffing.com ' +
-            'and include your full name, phone number, and the job you are applying for.',
-        trackerStatus,
-        trackerMessage:
-            trackerResult?.message || null,
-    });
-}
+            /*
+             * Log Tracker processing failures
+             * so they can be found in Render.
+             */
+            if (
+                trackerStatus !== 0 &&
+                trackerStatus !== 3
+            ) {
+                console.error(
+                    'APPLICATION_FAILED_TRACKER_STATUS',
+                    JSON.stringify({
+                        timestamp:
+                            new Date().toISOString(),
+                        fullName,
+                        email,
+                        cellphone,
+                        jobCode,
+                        source,
+                        resumeFilename:
+                            resume.filename,
+                        resumeSizeBytes:
+                            Buffer.byteLength(
+                                resume.data,
+                                'base64'
+                            ),
+                        trackerStatus,
+                        trackerMessage:
+                            trackerResult
+                                ?.message ||
+                            null,
+                        trackerResponse:
+                            trackerResult,
+                    })
+                );
+
+                return res.status(502).json({
+                    success: false,
+                    error:
+                        `We could not complete your application for job ${jobCode}. ` +
+                        'Please email your résumé to contactus@partnersinstaffing.com ' +
+                        'and include your full name, phone number, and the job you are applying for.',
+                    trackerStatus,
+                    trackerMessage:
+                        trackerResult?.message ||
+                        null,
+                });
+            }
+
+            /*
+             * Tracker reported success but did
+             * not return a usable candidate ID.
+             */
+            if (!recordId) {
+                const resumeSizeBytes =
+                    Buffer.byteLength(
+                        resume.data,
+                        'base64'
+                    );
+
+                console.error(
+                    'APPLICATION_FAILED_MISSING_RECORD_ID',
+                    JSON.stringify({
+                        timestamp:
+                            new Date().toISOString(),
+                        fullName,
+                        email,
+                        cellphone,
+                        jobCode,
+                        source,
+                        resumeFilename:
+                            resume.filename,
+                        resumeSizeBytes,
+                        trackerStatus,
+                        trackerMessage:
+                            trackerResult
+                                ?.message ||
+                            null,
+                        trackerResponse:
+                            trackerResult,
+                    })
+                );
+
+                return res.status(502).json({
+                    success: false,
+                    error:
+                        `We could not complete your application for job ${jobCode}. ` +
+                        'Please email your résumé to contactus@partnersinstaffing.com ' +
+                        'and include your full name, phone number, and the job you are applying for.',
+                    trackerStatus,
+                    trackerMessage:
+                        trackerResult?.message ||
+                        null,
+                });
+            }
 
             /*
              * Do not call resourceApplication
              * or attachDocument again.
              *
-             * createResourceFromResume has
-             * already performed those operations.
+             * createResourceFromResume already
+             * performed those operations.
              */
 
             const candidateActivity =
@@ -579,52 +625,46 @@ if (!recordId) {
                 }
             );
 
-            return res
-                .status(200)
-                .json({
-                    success: true,
-                    submitted: true,
-                    candidateRecordId:
-                        recordId,
-                    resource:
-                        trackerResult,
-                    shortlistHandledBy:
-                        'createResourceFromResume',
-                    documentHandledBy:
-                        'createResourceFromResume',
-                    candidateActivity,
-                    jobActivity,
-                });
+            return res.status(200).json({
+                success: true,
+                submitted: true,
+                candidateRecordId:
+                    recordId,
+                resource: trackerResult,
+                shortlistHandledBy:
+                    'createResourceFromResume',
+                documentHandledBy:
+                    'createResourceFromResume',
+                candidateActivity,
+                jobActivity,
+            });
         } catch (error) {
             console.error(
-                'Application error:',
-                {
+                'APPLICATION_UNEXPECTED_ERROR',
+                JSON.stringify({
+                    timestamp:
+                        new Date().toISOString(),
                     message:
                         error.message,
                     trackerDetails:
-                        error.response
-                            ?.data ||
+                        error.response?.data ||
                         null,
                     httpStatus:
-                        error.response
-                            ?.status ||
+                        error.response?.status ||
                         null,
-                }
+                })
             );
 
-            return res
-                .status(500)
-                .json({
-                    success: false,
-                    error:
-                        'The application could not be completed.',
-                    details:
-                        error.response
-                            ?.data || {
-                            message:
-                                error.message,
-                        },
-                });
+            return res.status(500).json({
+                success: false,
+                error:
+                    'The application could not be completed. Please email your résumé to contactus@partnersinstaffing.com and include your full name, phone number, and the job you are applying for.',
+                details:
+                    error.response?.data || {
+                        message:
+                            error.message,
+                    },
+            });
         }
     }
 );
